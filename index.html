@@ -10,15 +10,27 @@
     header{background: #2c3e50;color: white;padding: 20px;font-size: 28px;}
     .contenedor{width: 95%;margin: auto;margin-top: 20px;}
     .cards{display: flex;justify-content: center;align-items: stretch;gap: 30px;margin-top: 20px;flex-wrap: wrap;}
-    .card{background: white;width: 420px;padding: 20px;border-radius: 12px;box-shadow: 0px 0px 10px rgba(0,0,0,0.2);}
+    .card{background: white;width: 420px;max-width: 95vw;padding: 20px;border-radius: 12px;box-shadow: 0px 0px 10px rgba(0,0,0,0.2);}
     .dato{font-size: 40px;margin: 15px;color: #2980b9;}
     .estado{font-size: 20px;font-weight: bold;}
     .normal{color: green;}
-    .alerta{color: red;}
+    .alerta{color: red;animation: parpadeo 1s infinite;}
+    @keyframes parpadeo {0%{opacity:1;}50%{opacity:0.3;}100%{opacity:1;}}
+    .icono-alerta{display:inline-block;vertical-align:middle;color:red;font-size:28px;margin-right:8px;}
+    .icono-normal{display:inline-block;vertical-align:middle;color:green;font-size:28px;margin-right:8px;}
     canvas{margin-top: 20px;}
     .alertas{background: white;margin-top: 30px;padding: 20px;border-radius: 12px;text-align: left;box-shadow: 0px 0px 10px rgba(0,0,0,0.2);}
     ul{padding-left: 20px;}
     input{padding: 8px;font-size: 16px;margin-top: 10px;}
+    .spinner{display:none;margin:20px auto;border:6px solid #f3f3f3;border-top:6px solid #3498db;border-radius:50%;width:40px;height:40px;animation:spin 1s linear infinite;}
+    @keyframes spin{0%{transform:rotate(0deg);}100%{transform:rotate(360deg);}}
+    .export-btn{background:#2980b9;color:white;border:none;padding:8px 16px;border-radius:6px;cursor:pointer;margin-top:10px;}
+    .export-btn:hover{background:#1a5a7a;}
+    @media (max-width: 900px){.cards{flex-direction:column;align-items:center;}}
+    @media (max-width: 600px){.card{width:98vw;padding:10px;}}
+    /* Accesibilidad */
+    .card:focus{outline:3px solid #2980b9;}
+    .export-btn:focus{outline:2px solid #2980b9;}
   </style>
 </head>
 <body>
@@ -46,14 +58,20 @@
         <canvas id="graficoHumedad"></canvas>
       </div>
     </div>
-    <div class="alertas">
+    <div class="alertas" aria-label="Historial de Alertas">
       <h2>Historial de Alertas</h2>
-      <label><b>Seleccionar fecha:</b></label>
-      <input type="date" id="fechaSeleccionada" onchange="obtenerDatosPorFecha()">
+      <label for="fechaSeleccionada"><b>Seleccionar fecha:</b></label>
+      <input type="date" id="fechaSeleccionada" onchange="obtenerDatosPorFecha()" aria-label="Seleccionar fecha">
+      <button class="export-btn" onclick="exportarAlertas()" aria-label="Exportar historial de alertas">Exportar CSV</button>
       <ul id="listaAlertas"></ul>
     </div>
+    <div class="spinner" id="spinner" aria-label="Cargando datos" role="status"></div>
   </div>
   <script>
+    // Notificaciones Web
+    if ('Notification' in window && Notification.permission !== 'granted') {
+      Notification.requestPermission();
+    }
     // CONFIGURACIÓN THINGSPEAK
     const channelID = "3334837";
     const urlGrafico = `https://api.thingspeak.com/channels/${channelID}/feeds.json?days=1`;
@@ -77,23 +95,29 @@
     // OBTENER DATOS ACTUALES
     async function obtenerDatos() {
       try {
+        document.getElementById('spinner').style.display = 'block';
         // Obtener el último registro para las tarjetas
         const respUltimo = await fetch(urlUltimo);
         const ultimo = await respUltimo.json();
         let ultimaTemp = parseFloat(ultimo.field1);
         let ultimaHum = parseFloat(ultimo.field2);
-        document.getElementById("temperatura").innerHTML = isNaN(ultimaTemp) ? '-- °C' : ultimaTemp + " °C";
-        document.getElementById("humedad").innerHTML = isNaN(ultimaHum) ? '-- %' : ultimaHum + " %";
+        // Indicadores visuales
+        let iconoTemp = '', iconoHum = '';
         // Estado temperatura
         if (!isNaN(ultimaTemp)) {
           if (ultimaTemp < 18) {
-            document.getElementById("estadoTemp").innerHTML = "Hace frío - Foco ENCENDIDO";
+            iconoTemp = '<span class="icono-alerta" aria-label="Alerta temperatura">&#9888;</span>';
+            document.getElementById("estadoTemp").innerHTML = iconoTemp + "Hace frío - Foco ENCENDIDO";
             document.getElementById("estadoTemp").className = "estado alerta";
+            mostrarNotificacion('Alerta: Hace frío', `Temperatura: ${ultimaTemp} °C`);
           } else if (ultimaTemp > 24) {
-            document.getElementById("estadoTemp").innerHTML = "Hace calor - Ventilador ENCENDIDO";
+            iconoTemp = '<span class="icono-alerta" aria-label="Alerta temperatura">&#9888;</span>';
+            document.getElementById("estadoTemp").innerHTML = iconoTemp + "Hace calor - Ventilador ENCENDIDO";
             document.getElementById("estadoTemp").className = "estado alerta";
+            mostrarNotificacion('Alerta: Hace calor', `Temperatura: ${ultimaTemp} °C`);
           } else {
-            document.getElementById("estadoTemp").innerHTML = "Temperatura NORMAL";
+            iconoTemp = '<span class="icono-normal" aria-label="Temperatura normal">&#10003;</span>';
+            document.getElementById("estadoTemp").innerHTML = iconoTemp + "Temperatura NORMAL";
             document.getElementById("estadoTemp").className = "estado normal";
           }
         } else {
@@ -103,16 +127,21 @@
         // Estado humedad
         if (!isNaN(ultimaHum)) {
           if (ultimaHum < 50 || ultimaHum > 70) {
-            document.getElementById("estadoHum").innerHTML = "Humedad fuera de rango";
+            iconoHum = '<span class="icono-alerta" aria-label="Alerta humedad">&#9888;</span>';
+            document.getElementById("estadoHum").innerHTML = iconoHum + "Humedad fuera de rango";
             document.getElementById("estadoHum").className = "estado alerta";
+            mostrarNotificacion('Alerta: Humedad fuera de rango', `Humedad: ${ultimaHum} %`);
           } else {
-            document.getElementById("estadoHum").innerHTML = "Humedad NORMAL";
+            iconoHum = '<span class="icono-normal" aria-label="Humedad normal">&#10003;</span>';
+            document.getElementById("estadoHum").innerHTML = iconoHum + "Humedad NORMAL";
             document.getElementById("estadoHum").className = "estado normal";
           }
         } else {
           document.getElementById("estadoHum").innerHTML = "Esperando datos...";
           document.getElementById("estadoHum").className = "estado";
         }
+        document.getElementById("temperatura").innerHTML = isNaN(ultimaTemp) ? '-- °C' : ultimaTemp + " °C";
+        document.getElementById("humedad").innerHTML = isNaN(ultimaHum) ? '-- %' : ultimaHum + " %";
         // Obtener datos para los gráficos
         const response = await fetch(urlGrafico);
         const data = await response.json();
@@ -139,14 +168,21 @@
           temperaturasProm.push(promedioTemp.toFixed(2));
           humedadesProm.push(promedioHum.toFixed(2));
         }
-        // Actualizar gráficos
+        // Actualizar gráficos con colores según rango
         graficoTemp.data.labels = labels;
         graficoTemp.data.datasets[0].data = temperaturasProm;
+        graficoTemp.data.datasets[0].backgroundColor = temperaturasProm.map(t => t < 18 || t > 24 ? 'rgba(255,99,132,0.2)' : 'rgba(75,192,192,0.2)');
+        graficoTemp.data.datasets[0].borderColor = temperaturasProm.map(t => t < 18 || t > 24 ? 'rgba(255,99,132,1)' : 'rgba(75,192,192,1)');
         graficoTemp.update();
         graficoHum.data.labels = labels;
         graficoHum.data.datasets[0].data = humedadesProm;
+        graficoHum.data.datasets[0].backgroundColor = humedadesProm.map(h => h < 50 || h > 70 ? 'rgba(255,99,132,0.2)' : 'rgba(75,192,192,0.2)');
+        graficoHum.data.datasets[0].borderColor = humedadesProm.map(h => h < 50 || h > 70 ? 'rgba(255,99,132,1)' : 'rgba(75,192,192,1)');
         graficoHum.update();
+        document.getElementById('spinner').style.display = 'none';
       } catch (error) {
+        document.getElementById('spinner').style.display = 'none';
+        alert('Error al obtener datos. Verifica tu conexión.');
         console.log(error);
       }
     }
@@ -154,8 +190,9 @@
     // FILTRAR POR FECHA
     async function obtenerDatosPorFecha() {
       try {
+        document.getElementById('spinner').style.display = 'block';
         const fechaInput = document.getElementById("fechaSeleccionada").value;
-        if (!fechaInput) return;
+        if (!fechaInput) {document.getElementById('spinner').style.display = 'none'; return;}
         const response = await fetch(`https://api.thingspeak.com/channels/${channelID}/feeds.json?days=30`);
         const data = await response.json();
         const feeds = data.feeds.filter(feed => feed.field1 && feed.field2 && !isNaN(parseFloat(feed.field1)) && !isNaN(parseFloat(feed.field2)));
@@ -169,18 +206,46 @@
             let hora = fecha.getHours() + ":" + fecha.getMinutes() + ":" + fecha.getSeconds();
             if (temp < 25) agregarAlerta("Hace frío (" + temp + " °C) - " + hora);
             if (temp > 32) agregarAlerta("Hace calor (" + temp + " °C) - " + hora);
-            if (hum < 50) agregarAlerta("Humedad baja (" + hum + "%) - " + hora);
-            if (hum > 70) agregarAlerta("Humedad alta (" + hum + "%) - " + hora);
+            if (hum < 50) agregarAlerta("Humedad baja (" + hum + "% ) - " + hora);
+            if (hum > 70) agregarAlerta("Humedad alta (" + hum + "% ) - " + hora);
           }
         });
+        document.getElementById('spinner').style.display = 'none';
       } catch (error) {
+        document.getElementById('spinner').style.display = 'none';
+        alert('Error al obtener alertas.');
         console.log(error);
       }
     }
     function agregarAlerta(texto) {
       let li = document.createElement("li");
       li.innerHTML = texto;
+      li.setAttribute('tabindex','0');
       document.getElementById("listaAlertas").appendChild(li);
+    }
+
+    // Exportar historial de alertas a CSV
+    function exportarAlertas() {
+      let alertas = document.querySelectorAll('#listaAlertas li');
+      if(alertas.length === 0){alert('No hay alertas para exportar.');return;}
+      let csv = 'Alerta\n';
+      alertas.forEach(li => {csv += '"' + li.textContent.replace(/"/g,'""') + '"\n';});
+      let blob = new Blob([csv], {type:'text/csv'});
+      let url = URL.createObjectURL(blob);
+      let a = document.createElement('a');
+      a.href = url;
+      a.download = 'historial_alertas.csv';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    }
+
+    // Notificación web
+    function mostrarNotificacion(titulo, cuerpo) {
+      if ('Notification' in window && Notification.permission === 'granted') {
+        new Notification(titulo, {body: cuerpo, icon: 'https://cdn-icons-png.flaticon.com/512/1828/1828843.png'});
+      }
     }
     setInterval(obtenerDatos, 15000);
     obtenerDatos();
