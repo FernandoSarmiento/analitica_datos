@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Monitoreo IoT Avícola</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <style>
+    body{font-family: Arial, sans-serif;background: #f4f4f4;margin: 0;padding: 0;text-align: center;}
+    header{background: #2c3e50;color: white;padding: 20px;font-size: 28px;}
+    .contenedor{width: 95%;margin: auto;margin-top: 20px;}
+    .cards{display: flex;justify-content: center;align-items: stretch;gap: 30px;margin-top: 20px;flex-wrap: wrap;}
+    .card{background: white;width: 420px;padding: 20px;border-radius: 12px;box-shadow: 0px 0px 10px rgba(0,0,0,0.2);}
+    .dato{font-size: 40px;margin: 15px;color: #2980b9;}
+    .estado{font-size: 20px;font-weight: bold;}
+    .normal{color: green;}
+    .alerta{color: red;}
+    canvas{margin-top: 20px;}
+    .alertas{background: white;margin-top: 30px;padding: 20px;border-radius: 12px;text-align: left;box-shadow: 0px 0px 10px rgba(0,0,0,0.2);}
+    ul{padding-left: 20px;}
+    input{padding: 8px;font-size: 16px;margin-top: 10px;}
+  </style>
+</head>
+<body>
+  <header>Sistema IoT para Aves de Corral</header>
+  <div class="contenedor">
+    <div class="cards">
+      <div class="card">
+        <h2>Temperatura Actual</h2>
+        <div class="dato" id="temperatura">-- °C</div>
+        <div class="estado" id="estadoTemp">Esperando datos...</div>
+      </div>
+      <div class="card">
+        <h2>Humedad Actual</h2>
+        <div class="dato" id="humedad">-- %</div>
+        <div class="estado" id="estadoHum">Esperando datos...</div>
+      </div>
+    </div>
+    <div class="cards">
+      <div class="card">
+        <h2>Promedio de Temperatura por Hora</h2>
+        <canvas id="graficoTemperatura"></canvas>
+      </div>
+      <div class="card">
+        <h2>Promedio de Humedad por Hora</h2>
+        <canvas id="graficoHumedad"></canvas>
+      </div>
+    </div>
+    <div class="alertas">
+      <h2>Historial de Alertas</h2>
+      <label><b>Seleccionar fecha:</b></label>
+      <input type="date" id="fechaSeleccionada" onchange="obtenerDatosPorFecha()">
+      <ul id="listaAlertas"></ul>
+    </div>
+  </div>
+  <script>
+    // CONFIGURACIÓN THINGSPEAK
+    const channelID = "3334837";
+    const urlGrafico = `https://api.thingspeak.com/channels/${channelID}/feeds.json?days=1`;
+    const urlUltimo = `https://api.thingspeak.com/channels/${channelID}/feeds/last.json`;
+
+    // GRÁFICO TEMPERATURA
+    const ctxTemp = document.getElementById('graficoTemperatura');
+    const graficoTemp = new Chart(ctxTemp, {
+      type: 'line',
+      data: { labels: [], datasets: [{ label: 'Temperatura °C', data: [], borderWidth: 3, tension: 0.4 }] },
+      options: { responsive: true, interaction: { mode: 'index', intersect: false }, plugins: { legend: { display: true } } }
+    });
+    // GRÁFICO HUMEDAD
+    const ctxHum = document.getElementById('graficoHumedad');
+    const graficoHum = new Chart(ctxHum, {
+      type: 'line',
+      data: { labels: [], datasets: [{ label: 'Humedad %', data: [], borderWidth: 3, tension: 0.4 }] },
+      options: { responsive: true, interaction: { mode: 'index', intersect: false }, plugins: { legend: { display: true } } }
+    });
+
+    // OBTENER DATOS ACTUALES
+    async function obtenerDatos() {
+      try {
+        // Obtener el último registro para las tarjetas
+        const respUltimo = await fetch(urlUltimo);
+        const ultimo = await respUltimo.json();
+        let ultimaTemp = parseFloat(ultimo.field1);
+        let ultimaHum = parseFloat(ultimo.field2);
+        document.getElementById("temperatura").innerHTML = isNaN(ultimaTemp) ? '-- °C' : ultimaTemp + " °C";
+        document.getElementById("humedad").innerHTML = isNaN(ultimaHum) ? '-- %' : ultimaHum + " %";
+        // Estado temperatura
+        if (!isNaN(ultimaTemp)) {
+          if (ultimaTemp < 18) {
+            document.getElementById("estadoTemp").innerHTML = "Hace frío - Foco ENCENDIDO";
+            document.getElementById("estadoTemp").className = "estado alerta";
+          } else if (ultimaTemp > 24) {
+            document.getElementById("estadoTemp").innerHTML = "Hace calor - Ventilador ENCENDIDO";
+            document.getElementById("estadoTemp").className = "estado alerta";
+          } else {
+            document.getElementById("estadoTemp").innerHTML = "Temperatura NORMAL";
+            document.getElementById("estadoTemp").className = "estado normal";
+          }
+        } else {
+          document.getElementById("estadoTemp").innerHTML = "Esperando datos...";
+          document.getElementById("estadoTemp").className = "estado";
+        }
+        // Estado humedad
+        if (!isNaN(ultimaHum)) {
+          if (ultimaHum < 50 || ultimaHum > 70) {
+            document.getElementById("estadoHum").innerHTML = "Humedad fuera de rango";
+            document.getElementById("estadoHum").className = "estado alerta";
+          } else {
+            document.getElementById("estadoHum").innerHTML = "Humedad NORMAL";
+            document.getElementById("estadoHum").className = "estado normal";
+          }
+        } else {
+          document.getElementById("estadoHum").innerHTML = "Esperando datos...";
+          document.getElementById("estadoHum").className = "estado";
+        }
+        // Obtener datos para los gráficos
+        const response = await fetch(urlGrafico);
+        const data = await response.json();
+        const feeds = data.feeds.filter(feed => feed.field1 && feed.field2 && !isNaN(parseFloat(feed.field1)) && !isNaN(parseFloat(feed.field2)));
+        // Agrupar por hora
+        let horas = {};
+        feeds.forEach(feed => {
+          let temp = parseFloat(feed.field1);
+          let hum = parseFloat(feed.field2);
+          let fecha = new Date(feed.created_at);
+          let hora = String(fecha.getHours()).padStart(2, '0') + ":00";
+          if (!horas[hora]) horas[hora] = { temperaturas: [], humedades: [] };
+          horas[hora].temperaturas.push(temp);
+          horas[hora].humedades.push(hum);
+        });
+        // Promedios
+        let labels = [], temperaturasProm = [], humedadesProm = [];
+        for (let hora in horas) {
+          labels.push(hora);
+          let temps = horas[hora].temperaturas;
+          let hums = horas[hora].humedades;
+          let promedioTemp = temps.reduce((a, b) => a + b, 0) / temps.length;
+          let promedioHum = hums.reduce((a, b) => a + b, 0) / hums.length;
+          temperaturasProm.push(promedioTemp.toFixed(2));
+          humedadesProm.push(promedioHum.toFixed(2));
+        }
+        // Actualizar gráficos
+        graficoTemp.data.labels = labels;
+        graficoTemp.data.datasets[0].data = temperaturasProm;
+        graficoTemp.update();
+        graficoHum.data.labels = labels;
+        graficoHum.data.datasets[0].data = humedadesProm;
+        graficoHum.update();
+      } catch (error) {
+        console.log(error);
+      }
+    }
+
+    // FILTRAR POR FECHA
+    async function obtenerDatosPorFecha() {
+      try {
+        const fechaInput = document.getElementById("fechaSeleccionada").value;
+        if (!fechaInput) return;
+        const response = await fetch(`https://api.thingspeak.com/channels/${channelID}/feeds.json?days=30`);
+        const data = await response.json();
+        const feeds = data.feeds.filter(feed => feed.field1 && feed.field2 && !isNaN(parseFloat(feed.field1)) && !isNaN(parseFloat(feed.field2)));
+        document.getElementById("listaAlertas").innerHTML = "";
+        feeds.forEach(feed => {
+          let fecha = new Date(feed.created_at);
+          let fechaFeed = fecha.getFullYear() + "-" + String(fecha.getMonth() + 1).padStart(2, '0') + "-" + String(fecha.getDate()).padStart(2, '0');
+          if (fechaFeed == fechaInput) {
+            let temp = parseFloat(feed.field1);
+            let hum = parseFloat(feed.field2);
+            let hora = fecha.getHours() + ":" + fecha.getMinutes() + ":" + fecha.getSeconds();
+            if (temp < 25) agregarAlerta("Hace frío (" + temp + " °C) - " + hora);
+            if (temp > 32) agregarAlerta("Hace calor (" + temp + " °C) - " + hora);
+            if (hum < 50) agregarAlerta("Humedad baja (" + hum + "%) - " + hora);
+            if (hum > 70) agregarAlerta("Humedad alta (" + hum + "%) - " + hora);
+          }
+        });
+      } catch (error) {
+        console.log(error);
+      }
+    }
+    function agregarAlerta(texto) {
+      let li = document.createElement("li");
+      li.innerHTML = texto;
+      document.getElementById("listaAlertas").appendChild(li);
+    }
+    setInterval(obtenerDatos, 15000);
+    obtenerDatos();
+  </script>
+</body>
+</html>
