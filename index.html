@@ -37,6 +37,28 @@
   <header>Sistema IoT para Aves de Corral</header>
   <div class="contenedor">
     <div class="cards">
+      <div class="card" style="width:100%;max-width:900px;">
+        <button class="export-btn" id="btnMostrarConfig" onclick="mostrarConfigRangos()" aria-label="Mostrar configuración de rangos" type="button">Configurar rangos</button>
+        <form id="formRangos" onsubmit="return false;" style="display:none;flex-wrap:wrap;gap:20px;justify-content:center;align-items:center;margin-top:10px;">
+          <div>
+            <label for="tempMin">Temp. Mínima (°C):</label>
+            <input type="number" id="tempMin" value="18" step="0.1" style="width:70px;">
+          </div>
+          <div>
+            <label for="tempMax">Temp. Máxima (°C):</label>
+            <input type="number" id="tempMax" value="24" step="0.1" style="width:70px;">
+          </div>
+          <div>
+            <label for="humMin">Humedad Mín. (%):</label>
+            <input type="number" id="humMin" value="50" step="0.1" style="width:70px;">
+          </div>
+          <div>
+            <label for="humMax">Humedad Máx. (%):</label>
+            <input type="number" id="humMax" value="70" step="0.1" style="width:70px;">
+          </div>
+          <button class="export-btn" onclick="actualizarRangos()" aria-label="Actualizar rangos" type="button">Actualizar</button>
+        </form>
+      </div>
       <div class="card">
         <h2>Temperatura Actual</h2>
         <div class="dato" id="temperatura">-- °C</div>
@@ -62,8 +84,18 @@
       <h2>Historial de Alertas</h2>
       <label for="fechaSeleccionada"><b>Seleccionar fecha:</b></label>
       <input type="date" id="fechaSeleccionada" onchange="obtenerDatosPorFecha()" aria-label="Seleccionar fecha">
-      <button class="export-btn" onclick="exportarAlertas()" aria-label="Exportar historial de alertas">Exportar CSV</button>
-      <ul id="listaAlertas"></ul>
+      <button class="export-btn" onclick="exportarDatos()" aria-label="Exportar datos de la fecha seleccionada">Exportar datos</button>
+      <div id="resumenDia" style="margin-top:20px;display:flex;gap:20px;flex-wrap:wrap;justify-content:center;"></div>
+      <div style="display:flex;gap:30px;flex-wrap:wrap;">
+        <div style="flex:1;min-width:200px;">
+          <h3 style="color:#2980b9;">Alertas de Temperatura</h3>
+          <ul id="listaAlertasTemp"></ul>
+        </div>
+        <div style="flex:1;min-width:200px;">
+          <h3 style="color:#2980b9;">Alertas de Humedad</h3>
+          <ul id="listaAlertasHum"></ul>
+        </div>
+      </div>
     </div>
     <div class="spinner" id="spinner" aria-label="Cargando datos" role="status"></div>
   </div>
@@ -76,6 +108,28 @@
     const channelID = "3334837";
     const urlGrafico = `https://api.thingspeak.com/channels/${channelID}/feeds.json?days=1`;
     const urlUltimo = `https://api.thingspeak.com/channels/${channelID}/feeds/last.json`;
+
+    // Rangos de alerta (valores por defecto)
+    let tempMin = 18;
+    let tempMax = 24;
+    let humMin = 50;
+    let humMax = 70;
+
+    function mostrarConfigRangos() {
+      document.getElementById('formRangos').style.display = 'flex';
+      document.getElementById('btnMostrarConfig').style.display = 'none';
+    }
+
+    function actualizarRangos() {
+      tempMin = parseFloat(document.getElementById('tempMin').value);
+      tempMax = parseFloat(document.getElementById('tempMax').value);
+      humMin = parseFloat(document.getElementById('humMin').value);
+      humMax = parseFloat(document.getElementById('humMax').value);
+      document.getElementById('formRangos').style.display = 'none';
+      document.getElementById('btnMostrarConfig').style.display = 'inline-block';
+      obtenerDatos();
+      obtenerDatosPorFecha();
+    }
 
     // GRÁFICO TEMPERATURA
     const ctxTemp = document.getElementById('graficoTemperatura');
@@ -105,12 +159,12 @@
         let iconoTemp = '', iconoHum = '';
         // Estado temperatura
         if (!isNaN(ultimaTemp)) {
-          if (ultimaTemp < 18) {
+          if (ultimaTemp < tempMin) {
             iconoTemp = '<span class="icono-alerta" aria-label="Alerta temperatura">&#9888;</span>';
             document.getElementById("estadoTemp").innerHTML = iconoTemp + "Hace frío - Foco ENCENDIDO";
             document.getElementById("estadoTemp").className = "estado alerta";
             mostrarNotificacion('Alerta: Hace frío', `Temperatura: ${ultimaTemp} °C`);
-          } else if (ultimaTemp > 24) {
+          } else if (ultimaTemp > tempMax) {
             iconoTemp = '<span class="icono-alerta" aria-label="Alerta temperatura">&#9888;</span>';
             document.getElementById("estadoTemp").innerHTML = iconoTemp + "Hace calor - Ventilador ENCENDIDO";
             document.getElementById("estadoTemp").className = "estado alerta";
@@ -126,7 +180,7 @@
         }
         // Estado humedad
         if (!isNaN(ultimaHum)) {
-          if (ultimaHum < 50 || ultimaHum > 70) {
+          if (ultimaHum < humMin || ultimaHum > humMax) {
             iconoHum = '<span class="icono-alerta" aria-label="Alerta humedad">&#9888;</span>';
             document.getElementById("estadoHum").innerHTML = iconoHum + "Humedad fuera de rango";
             document.getElementById("estadoHum").className = "estado alerta";
@@ -171,13 +225,13 @@
         // Actualizar gráficos con colores según rango
         graficoTemp.data.labels = labels;
         graficoTemp.data.datasets[0].data = temperaturasProm;
-        graficoTemp.data.datasets[0].backgroundColor = temperaturasProm.map(t => t < 18 || t > 24 ? 'rgba(255,99,132,0.2)' : 'rgba(75,192,192,0.2)');
-        graficoTemp.data.datasets[0].borderColor = temperaturasProm.map(t => t < 18 || t > 24 ? 'rgba(255,99,132,1)' : 'rgba(75,192,192,1)');
+        graficoTemp.data.datasets[0].backgroundColor = temperaturasProm.map(t => t < tempMin || t > tempMax ? 'rgba(255,99,132,0.2)' : 'rgba(75,192,192,0.2)');
+        graficoTemp.data.datasets[0].borderColor = temperaturasProm.map(t => t < tempMin || t > tempMax ? 'rgba(255,99,132,1)' : 'rgba(75,192,192,1)');
         graficoTemp.update();
         graficoHum.data.labels = labels;
         graficoHum.data.datasets[0].data = humedadesProm;
-        graficoHum.data.datasets[0].backgroundColor = humedadesProm.map(h => h < 50 || h > 70 ? 'rgba(255,99,132,0.2)' : 'rgba(75,192,192,0.2)');
-        graficoHum.data.datasets[0].borderColor = humedadesProm.map(h => h < 50 || h > 70 ? 'rgba(255,99,132,1)' : 'rgba(75,192,192,1)');
+        graficoHum.data.datasets[0].backgroundColor = humedadesProm.map(h => h < humMin || h > humMax ? 'rgba(255,99,132,0.2)' : 'rgba(75,192,192,0.2)');
+        graficoHum.data.datasets[0].borderColor = humedadesProm.map(h => h < humMin || h > humMax ? 'rgba(255,99,132,1)' : 'rgba(75,192,192,1)');
         graficoHum.update();
         document.getElementById('spinner').style.display = 'none';
       } catch (error) {
@@ -196,20 +250,58 @@
         const response = await fetch(`https://api.thingspeak.com/channels/${channelID}/feeds.json?days=30`);
         const data = await response.json();
         const feeds = data.feeds.filter(feed => feed.field1 && feed.field2 && !isNaN(parseFloat(feed.field1)) && !isNaN(parseFloat(feed.field2)));
-        document.getElementById("listaAlertas").innerHTML = "";
+        document.getElementById("listaAlertasTemp").innerHTML = "";
+        document.getElementById("listaAlertasHum").innerHTML = "";
+        const resumen = {
+          temp: { suma: 0, count: 0, min: Number.POSITIVE_INFINITY, max: Number.NEGATIVE_INFINITY },
+          hum: { suma: 0, count: 0, min: Number.POSITIVE_INFINITY, max: Number.NEGATIVE_INFINITY }
+        };
         feeds.forEach(feed => {
           let fecha = new Date(feed.created_at);
           let fechaFeed = fecha.getFullYear() + "-" + String(fecha.getMonth() + 1).padStart(2, '0') + "-" + String(fecha.getDate()).padStart(2, '0');
           if (fechaFeed == fechaInput) {
             let temp = parseFloat(feed.field1);
             let hum = parseFloat(feed.field2);
+            resumen.temp.suma += temp;
+            resumen.temp.count += 1;
+            resumen.temp.min = Math.min(resumen.temp.min, temp);
+            resumen.temp.max = Math.max(resumen.temp.max, temp);
+            resumen.hum.suma += hum;
+            resumen.hum.count += 1;
+            resumen.hum.min = Math.min(resumen.hum.min, hum);
+            resumen.hum.max = Math.max(resumen.hum.max, hum);
             let hora = fecha.getHours() + ":" + fecha.getMinutes() + ":" + fecha.getSeconds();
-            if (temp < 25) agregarAlerta("Hace frío (" + temp + " °C) - " + hora);
-            if (temp > 32) agregarAlerta("Hace calor (" + temp + " °C) - " + hora);
-            if (hum < 50) agregarAlerta("Humedad baja (" + hum + "% ) - " + hora);
-            if (hum > 70) agregarAlerta("Humedad alta (" + hum + "% ) - " + hora);
+            if (temp < tempMin) agregarAlerta("Hace frío (" + temp + " °C) - " + hora, 'temp');
+            if (temp > tempMax) agregarAlerta("Hace calor (" + temp + " °C) - " + hora, 'temp');
+            if (hum < humMin) agregarAlerta("Humedad baja (" + hum + "% ) - " + hora, 'hum');
+            if (hum > humMax) agregarAlerta("Humedad alta (" + hum + "% ) - " + hora, 'hum');
           }
         });
+        // Mostrar resumen del día
+        const resumenDia = document.getElementById('resumenDia');
+        resumenDia.innerHTML = '';
+        if (resumen.temp.count > 0 || resumen.hum.count > 0) {
+          if (resumen.temp.count > 0) {
+            const avgTemp = (resumen.temp.suma / resumen.temp.count).toFixed(2);
+            resumenDia.innerHTML += `<div style="background:#f4f4f4;padding:12px;border-radius:10px;box-shadow:0 0 8px rgba(0,0,0,0.08);flex:1;min-width:200px;">
+              <h4>Temperatura</h4>
+              <p>Promedio: ${avgTemp} °C</p>
+              <p>Mínima: ${resumen.temp.min.toFixed(2)} °C</p>
+              <p>Máxima: ${resumen.temp.max.toFixed(2)} °C</p>
+            </div>`;
+          }
+          if (resumen.hum.count > 0) {
+            const avgHum = (resumen.hum.suma / resumen.hum.count).toFixed(2);
+            resumenDia.innerHTML += `<div style="background:#f4f4f4;padding:12px;border-radius:10px;box-shadow:0 0 8px rgba(0,0,0,0.08);flex:1;min-width:200px;">
+              <h4>Humedad</h4>
+              <p>Promedio: ${avgHum} %</p>
+              <p>Mínima: ${resumen.hum.min.toFixed(2)} %</p>
+              <p>Máxima: ${resumen.hum.max.toFixed(2)} %</p>
+            </div>`;
+          }
+        } else {
+          resumenDia.innerHTML = `<div style="width:100%;color:#555;">No hay registros para esta fecha.</div>`;
+        }
         document.getElementById('spinner').style.display = 'none';
       } catch (error) {
         document.getElementById('spinner').style.display = 'none';
@@ -217,28 +309,52 @@
         console.log(error);
       }
     }
-    function agregarAlerta(texto) {
+    function agregarAlerta(texto, tipo) {
       let li = document.createElement("li");
       li.innerHTML = texto;
       li.setAttribute('tabindex','0');
-      document.getElementById("listaAlertas").appendChild(li);
+      if(tipo === 'temp') {
+        document.getElementById("listaAlertasTemp").appendChild(li);
+      } else if(tipo === 'hum') {
+        document.getElementById("listaAlertasHum").appendChild(li);
+      }
     }
 
-    // Exportar historial de alertas a CSV
-    function exportarAlertas() {
-      let alertas = document.querySelectorAll('#listaAlertas li');
-      if(alertas.length === 0){alert('No hay alertas para exportar.');return;}
-      let csv = 'Alerta\n';
-      alertas.forEach(li => {csv += '"' + li.textContent.replace(/"/g,'""') + '"\n';});
-      let blob = new Blob([csv], {type:'text/csv'});
-      let url = URL.createObjectURL(blob);
-      let a = document.createElement('a');
-      a.href = url;
-      a.download = 'historial_alertas.csv';
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
+    // Exportar los datos de la fecha seleccionada a CSV
+    function exportarDatos() {
+      let fechaInput = document.getElementById('fechaSeleccionada').value;
+      if (!fechaInput) { alert('Selecciona una fecha primero.'); return; }
+      const url = `https://api.thingspeak.com/channels/${channelID}/feeds.json?days=30`;
+      fetch(url)
+        .then(resp => resp.json())
+        .then(data => {
+          const feeds = data.feeds.filter(feed => feed.field1 && feed.field2 && !isNaN(parseFloat(feed.field1)) && !isNaN(parseFloat(feed.field2)));
+          const filas = [];
+          filas.push(['FechaHora','Temperatura','Humedad'].join(','));
+          feeds.forEach(feed => {
+            const fecha = new Date(feed.created_at);
+            const fechaFeed = fecha.getFullYear() + '-' + String(fecha.getMonth()+1).padStart(2,'0') + '-' + String(fecha.getDate()).padStart(2,'0');
+            if (fechaFeed === fechaInput) {
+              const hora = fecha.getHours() + ':' + fecha.getMinutes() + ':' + fecha.getSeconds();
+              filas.push([fechaFeed + ' ' + hora, feed.field1, feed.field2].join(','));
+            }
+          });
+          if (filas.length === 1) { alert('No hay datos para la fecha seleccionada.'); return; }
+          const csv = filas.join('\n');
+          const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+          const urlBlob = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = urlBlob;
+          a.download = `datos_${fechaInput}.csv`;
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+          URL.revokeObjectURL(urlBlob);
+        })
+        .catch(error => {
+          alert('Error al exportar datos.');
+          console.log(error);
+        });
     }
 
     // Notificación web
