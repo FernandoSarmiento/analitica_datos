@@ -131,8 +131,6 @@ async function obtenerDatos() {
     }
 
     feeds.sort((a, b) => parseInt(a.entry_id) - parseInt(b.entry_id));
-    const latestFeed = feeds[feeds.length - 1];
-    await guardarLecturaUltimaYHistorico(latestFeed);
 
     let horas = {};
     feeds.forEach(feed => {
@@ -169,15 +167,6 @@ async function obtenerDatos() {
     graficoHum.data.datasets[0].backgroundColor = humedadesProm.map(h => h < humMin || h > humMax ? 'rgba(255,99,132,0.2)' : 'rgba(75,192,192,0.2)');
     graficoHum.data.datasets[0].borderColor = humedadesProm.map(h => h < humMin || h > humMax ? 'rgba(255,99,132,1)' : 'rgba(75,192,192,1)');
     graficoHum.update();
-
-    const currentHourLabel = String(new Date(latestFeed.created_at).getHours()).padStart(2, '0') + ":00";
-    const currentHourKey = `${latestFeed.created_at.slice(0,10)}_${currentHourLabel.slice(0,2)}`;
-    const currentHourData = horas[currentHourLabel];
-    if (currentHourData) {
-      const avgTemp = currentHourData.temperaturas.reduce((a, b) => a + b, 0) / currentHourData.temperaturas.length;
-      const avgHum = currentHourData.humedades.reduce((a, b) => a + b, 0) / currentHourData.humedades.length;
-      await guardarPromedioHora(currentHourKey, avgTemp, avgHum, latestFeed.created_at);
-    }
 
     document.getElementById('spinner').style.display = 'none';
   } catch (error) {
@@ -302,181 +291,22 @@ function mostrarNotificacion(titulo, cuerpo) {
   }
 }
 
-async function cargarHistoricoFirebase() {
-  try {
-    const fechaFiltro = document.getElementById('fechaFiltroHistorico').value;
-    let lecturasQuery = db.collection('historico_lecturas').orderBy('fecha', 'desc');
-    let promediosQuery = db.collection('promedios_hora').orderBy('fechaRegistro', 'desc');
-
-    if (fechaFiltro) {
-      const inicio = `${fechaFiltro}T00:00:00.000Z`;
-      const fin = `${fechaFiltro}T23:59:59.999Z`;
-      lecturasQuery = lecturasQuery.where('fecha', '>=', inicio).where('fecha', '<=', fin);
-      promediosQuery = promediosQuery.where('fechaRegistro', '>=', inicio).where('fechaRegistro', '<=', fin);
-    }
-
-    const lecturasSnapshot = await lecturasQuery.get();
-    const promediosSnapshot = await promediosQuery.get();
-
-    const tablaLecturas = document.querySelector('#tablaLecturas tbody');
-    tablaLecturas.innerHTML = '';
-    lecturasSnapshot.forEach(docSnap => {
-      const data = docSnap.data();
-      const fecha = new Date(data.fecha).toLocaleString();
-      const tr = document.createElement('tr');
-      tr.innerHTML = `<td>${fecha}</td><td>${data.temperatura}</td><td>${data.humedad}</td><td>${data.entry_id}</td>`;
-      tablaLecturas.appendChild(tr);
-    });
-    if (tablaLecturas.children.length === 0) {
-      const tr = document.createElement('tr');
-      tr.innerHTML = `<td colspan="4" style="padding:12px;color:#666;">No hay lecturas guardadas.</td>`;
-      tablaLecturas.appendChild(tr);
-    }
-
-    const tablaPromedios = document.querySelector('#tablaPromedios tbody');
-    tablaPromedios.innerHTML = '';
-    promediosSnapshot.forEach(docSnap => {
-      const data = docSnap.data();
-      const fecha = new Date(data.fechaRegistro).toLocaleDateString();
-      const tr = document.createElement('tr');
-      tr.innerHTML = `<td>${fecha}</td><td>${data.hora}</td><td>${Number(data.temperatura).toFixed(2)}</td><td>${Number(data.humedad).toFixed(2)}</td>`;
-      tablaPromedios.appendChild(tr);
-    });
-    if (tablaPromedios.children.length === 0) {
-      const tr = document.createElement('tr');
-      tr.innerHTML = `<td colspan="4" style="padding:12px;color:#666;">No hay promedios horarios guardados.</td>`;
-      tablaPromedios.appendChild(tr);
-    }
-
-    document.getElementById('historicoMensajes').textContent = `Histórico cargado ${fechaFiltro ? 'para ' + fechaFiltro : 'de todas las fechas'}.`;
-  } catch (error) {
-    console.error(error);
-    document.getElementById('historicoMensajes').textContent = 'Error al cargar el histórico desde Firebase.';
-  }
-}
-
-async function exportarLecturasFirebase() {
-  try {
-    const snapshot = await db.collection('historico_lecturas').orderBy('fecha', 'desc').get();
-    const filas = [['FechaHora','Temperatura','Humedad','Entry ID']];
-    snapshot.forEach(docSnap => {
-      const data = docSnap.data();
-      filas.push([data.fecha, data.temperatura, data.humedad, data.entry_id]);
-    });
-    if (filas.length === 1) { alert('No hay lecturas para exportar.'); return; }
-    const csv = filas.map(row => row.join(',')).join('\n');
-    descargarCSV(csv, 'lecturas_firebase.csv');
-  } catch (error) {
-    console.error(error);
-    alert('Error al exportar lecturas de Firebase.');
-  }
-}
-
-async function exportarPromediosFirebase() {
-  try {
-    const snapshot = await db.collection('promedios_hora').orderBy('fechaRegistro', 'desc').get();
-    const filas = [['Fecha','Hora','Temperatura promedio','Humedad promedio']];
-    snapshot.forEach(docSnap => {
-      const data = docSnap.data();
-      filas.push([data.fechaRegistro, data.hora, Number(data.temperatura).toFixed(2), Number(data.humedad).toFixed(2)]);
-    });
-    if (filas.length === 1) { alert('No hay promedios para exportar.'); return; }
-    const csv = filas.map(row => row.join(',')).join('\n');
-    descargarCSV(csv, 'promedios_hora_firebase.csv');
-  } catch (error) {
-    console.error(error);
-    alert('Error al exportar promedios de Firebase.');
-  }
-}
-
-function descargarCSV(csv, nombreArchivo) {
-  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-  const urlBlob = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = urlBlob;
-  a.download = nombreArchivo;
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  URL.revokeObjectURL(urlBlob);
-}
-
-async function guardarLecturaUltimaYHistorico(feed) {
-  try {
-    const idLectura = feed.entry_id.toString();
-    const ultimaRef = db.collection('lecturas').doc('ultima');
-    const ultimaSnap = await ultimaRef.get();
-    const currentData = {
-      entry_id: idLectura,
-      temperatura: Number(feed.field1),
-      humedad: Number(feed.field2),
-      fecha: feed.created_at
-    };
-
-    if (!ultimaSnap.exists || ultimaSnap.data().entry_id !== idLectura) {
-      await ultimaRef.set(currentData);
-      await db.collection('historico_lecturas').doc(idLectura).set(currentData);
-    }
-  } catch (error) {
-    console.warn('No se pudo guardar la lectura en Firebase:', error);
-  }
-}
-
-async function guardarPromedioHora(id, temperatura, humedad, fechaRegistro) {
-  try {
-    const docRef = db.collection('promedios_hora').doc(id);
-    const snapshot = await docRef.get();
-    if (snapshot.exists) {
-      return;
-    }
-    await docRef.set({
-      hora: id,
-      temperatura,
-      humedad,
-      fechaRegistro: fechaRegistro || new Date().toISOString()
-    });
-  } catch (error) {
-    console.warn('No se pudo guardar el promedio horario en Firebase:', error);
-  }
-}
-
-function mostrarNotificacion(titulo, cuerpo) {
-  if ('Notification' in window && Notification.permission === 'granted') {
-    new Notification(titulo, { body: cuerpo, icon: 'https://cdn-icons-png.flaticon.com/512/1828/1828843.png' });
-  }
-}
-
 function cambiarPestana(pestana) {
   const dash = document.getElementById('dashboardContenedor');
   const pollos = document.getElementById('seccionPollos');
-  const historico = document.getElementById('seccionHistorico');
   const tabDash = document.getElementById('tab-dashboard');
   const tabPoll = document.getElementById('tab-pollos');
-  const tabHist = document.getElementById('tab-historico');
   const floating = document.getElementById('floatingConfigBtn');
   if (pestana === 'pollos') {
     dash.style.display = 'none';
     pollos.style.display = 'block';
-    historico.style.display = 'none';
     tabDash.classList.remove('active'); tabDash.setAttribute('aria-selected','false');
     tabPoll.classList.add('active'); tabPoll.setAttribute('aria-selected','true');
-    tabHist.classList.remove('active'); tabHist.setAttribute('aria-selected','false');
     if (floating) floating.style.display = 'none';
-  } else if (pestana === 'historico') {
-    dash.style.display = 'none';
-    pollos.style.display = 'none';
-    historico.style.display = 'block';
-    tabDash.classList.remove('active'); tabDash.setAttribute('aria-selected','false');
-    tabPoll.classList.remove('active'); tabPoll.setAttribute('aria-selected','false');
-    tabHist.classList.add('active'); tabHist.setAttribute('aria-selected','true');
-    if (floating) floating.style.display = 'none';
-    cargarHistoricoFirebase();
   } else {
     dash.style.display = 'block';
     pollos.style.display = 'none';
-    historico.style.display = 'none';
     tabPoll.classList.remove('active'); tabPoll.setAttribute('aria-selected','false');
-    tabHist.classList.remove('active'); tabHist.setAttribute('aria-selected','false');
     tabDash.classList.add('active'); tabDash.setAttribute('aria-selected','true');
     if (floating) floating.style.display = 'inline-block';
   }
