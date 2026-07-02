@@ -258,8 +258,38 @@ function agregarAlerta(texto, tipo) {
 }
 
 function exportarDatos() {
-  let fechaInput = document.getElementById('fechaSeleccionada').value;
-  if (!fechaInput) { alert('Selecciona una fecha primero.'); return; }
+  const fechaInput = document.getElementById('fechaSeleccionada').value;
+  const fechaInicio = document.getElementById('fechaInicio').value;
+  const fechaFin = document.getElementById('fechaFin').value;
+
+  if (!fechaInicio && !fechaInput) {
+    alert('Selecciona al menos una fecha o un rango para exportar.');
+    return;
+  }
+
+  let startDate;
+  let endDate;
+  let nombreArchivo;
+
+  if (fechaInicio) {
+    startDate = new Date(`${fechaInicio}T00:00:00`);
+    if (fechaFin) {
+      endDate = new Date(`${fechaFin}T23:59:59`);
+      if (endDate < startDate) {
+        alert('La fecha de fin debe ser igual o posterior a la fecha de inicio.');
+        return;
+      }
+      nombreArchivo = `datos_${fechaInicio}_a_${fechaFin}.csv`;
+    } else {
+      endDate = new Date(`${fechaInicio}T23:59:59`);
+      nombreArchivo = `datos_${fechaInicio}.csv`;
+    }
+  } else {
+    startDate = new Date(`${fechaInput}T00:00:00`);
+    endDate = new Date(`${fechaInput}T23:59:59`);
+    nombreArchivo = `datos_${fechaInput}.csv`;
+  }
+
   const url = `https://api.thingspeak.com/channels/${channelID}/feeds.json?days=30`;
   fetch(url)
     .then(resp => resp.json())
@@ -269,15 +299,14 @@ function exportarDatos() {
       filas.push(['FechaHora','Temperatura','Humedad'].join(','));
       feeds.forEach(feed => {
         const fecha = new Date(feed.created_at);
-        const fechaFeed = fecha.getFullYear() + '-' + String(fecha.getMonth()+1).padStart(2,'0') + '-' + String(fecha.getDate()).padStart(2,'0');
-        if (fechaFeed === fechaInput) {
-          const hora = fecha.getHours() + ':' + fecha.getMinutes() + ':' + fecha.getSeconds();
+        if (fecha >= startDate && fecha <= endDate) {
+          const hora = String(fecha.getHours()).padStart(2, '0') + ':' + String(fecha.getMinutes()).padStart(2, '0') + ':' + String(fecha.getSeconds()).padStart(2, '0');
+          const fechaFeed = fecha.getFullYear() + '-' + String(fecha.getMonth()+1).padStart(2,'0') + '-' + String(fecha.getDate()).padStart(2,'0');
           filas.push([fechaFeed + ' ' + hora, feed.field1, feed.field2].join(','));
         }
       });
-      if (filas.length === 1) { alert('No hay datos para la fecha seleccionada.'); return; }
       const csv = filas.join('\n');
-      descargarCSV(csv, `datos_${fechaInput}.csv`);
+      descargarCSV(csv, nombreArchivo);
     })
     .catch(error => {
       alert('Error al exportar datos.');

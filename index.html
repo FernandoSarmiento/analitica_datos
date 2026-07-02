@@ -74,9 +74,23 @@
     </div>
     <div class="alertas" aria-label="Historial de Alertas">
       <h2>Historial de Alertas</h2>
-      <label for="fechaSeleccionada"><b>Seleccionar fecha:</b></label>
-      <input type="date" id="fechaSeleccionada" onchange="obtenerDatosPorFecha()" aria-label="Seleccionar fecha">
-      <button class="export-btn" onclick="exportarDatos()" aria-label="Exportar datos de la fecha seleccionada">Exportar datos</button>
+      <div style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap;">
+        <div>
+          <label for="fechaSeleccionada"><b>Seleccionar fecha:</b></label><br>
+          <input type="date" id="fechaSeleccionada" onchange="obtenerDatosPorFecha()" aria-label="Seleccionar fecha">
+        </div>
+        <div>
+          <label for="fechaInicio"><b>Inicio rango:</b></label><br>
+          <input type="date" id="fechaInicio" aria-label="Fecha de inicio para exportar">
+        </div>
+        <div>
+          <label for="fechaFin"><b>Fin rango:</b></label><br>
+          <input type="date" id="fechaFin" aria-label="Fecha de fin para exportar">
+        </div>
+        <div>
+          <button class="export-btn" onclick="exportarDatos()" aria-label="Exportar datos seleccionados">Exportar datos</button>
+        </div>
+      </div>
       <div id="resumenDia" style="margin-top:20px;display:flex;gap:20px;flex-wrap:wrap;justify-content:center;"></div>
       <div style="display:flex;gap:30px;flex-wrap:wrap;">
         <div style="flex:1;min-width:200px;">
