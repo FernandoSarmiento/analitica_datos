@@ -5,6 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Monitoreo IoT Avícola</title>
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore-compat.js"></script>
   <link rel="stylesheet" href="css/styles.css">
 </head>
 <body>
@@ -19,6 +21,10 @@
         <button class="menu-item tab" role="tab" aria-selected="false" id="tab-pollos" onclick="cambiarPestana('pollos')">
           <span class="icon" aria-hidden="true">🐔</span>
           <span class="label">Pollos</span>
+        </button>
+        <button class="menu-item tab" role="tab" aria-selected="false" id="tab-historico" onclick="cambiarPestana('historico')">
+          <span class="icon" aria-hidden="true">📁</span>
+          <span class="label">Histórico Firebase</span>
         </button>
       </div>
       <div class="sidebar-bottom">
@@ -135,6 +141,56 @@
           <tbody></tbody>
         </table>
       </div>
+        </div>
+      </div>
+      <!-- Sección Histórico Firebase -->
+      <div class="contenedor" id="seccionHistorico" style="display:none;">
+        <div class="card" style="max-width:900px;margin:0 auto;">
+          <h2>Histórico Firebase</h2>
+          <div style="display:flex;flex-wrap:wrap;gap:12px;align-items:flex-end;margin-bottom:16px;">
+            <div>
+              <label for="fechaFiltroHistorico">Fecha:</label><br>
+              <input type="date" id="fechaFiltroHistorico">
+            </div>
+            <div>
+              <button class="export-btn" type="button" onclick="cargarHistoricoFirebase()">Cargar histórico</button>
+            </div>
+            <div>
+              <button class="export-btn" type="button" onclick="exportarLecturasFirebase()">Exportar lecturas CSV</button>
+            </div>
+            <div>
+              <button class="export-btn" type="button" onclick="exportarPromediosFirebase()">Exportar promedios CSV</button>
+            </div>
+          </div>
+          <div id="historicoMensajes" style="margin-bottom:16px;color:#333;"></div>
+          <div style="overflow:auto;max-height:280px;margin-bottom:24px;">
+            <h3>Lecturas guardadas</h3>
+            <table id="tablaLecturas" style="width:100%;border-collapse:collapse;">
+              <thead>
+                <tr style="background:#f4f4f4;text-align:left;">
+                  <th style="padding:8px;border-bottom:1px solid #ddd;">Fecha/Hora</th>
+                  <th style="padding:8px;border-bottom:1px solid #ddd;">Temperatura</th>
+                  <th style="padding:8px;border-bottom:1px solid #ddd;">Humedad</th>
+                  <th style="padding:8px;border-bottom:1px solid #ddd;">Entry ID</th>
+                </tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+          </div>
+          <div style="overflow:auto;max-height:280px;">
+            <h3>Promedios horarios</h3>
+            <table id="tablaPromedios" style="width:100%;border-collapse:collapse;">
+              <thead>
+                <tr style="background:#f4f4f4;text-align:left;">
+                  <th style="padding:8px;border-bottom:1px solid #ddd;">Fecha</th>
+                  <th style="padding:8px;border-bottom:1px solid #ddd;">Hora</th>
+                  <th style="padding:8px;border-bottom:1px solid #ddd;">Temp. promedio</th>
+                  <th style="padding:8px;border-bottom:1px solid #ddd;">Hum. promedio</th>
+                </tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+          </div>
         </div>
       </div>
       <!-- Botón flotante de configuración -->

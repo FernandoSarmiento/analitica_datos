@@ -1,7 +1,22 @@
-// Notificaciones Web
+﻿// Notificaciones Web
 if ('Notification' in window && Notification.permission !== 'granted') {
   Notification.requestPermission();
 }
+
+// CONFIGURACIÓN FIREBASE
+const firebaseConfig = {
+  apiKey: "AIzaSyD77B4YWz9Qiqto3yg5xrYK8toCEhwnFOM",
+  authDomain: "sistema-iot-aves.firebaseapp.com",
+  projectId: "sistema-iot-aves",
+  storageBucket: "sistema-iot-aves.firebasestorage.app",
+  messagingSenderId: "52467825689",
+  appId: "1:52467825689:web:04b29c5049946dd961be88",
+  measurementId: "G-JHTPWQBY2P"
+};
+
+firebase.initializeApp(firebaseConfig);
+const db = firebase.firestore();
+
 // CONFIGURACIÓN THINGSPEAK
 const channelID = "3334837";
 const urlGrafico = `https://api.thingspeak.com/channels/${channelID}/feeds.json?days=1`;
@@ -111,6 +126,8 @@ async function obtenerDatos() {
     const data = await response.json();
     const feeds = data.feeds.filter(feed => feed.field1 && feed.field2 && !isNaN(parseFloat(feed.field1)) && !isNaN(parseFloat(feed.field2)));
 
+    const firestoreSaves = feeds.map(feed => guardarLecturaThingSpeak(feed));
+
     let horas = {};
     feeds.forEach(feed => {
       let temp = parseFloat(feed.field1);
@@ -123,6 +140,7 @@ async function obtenerDatos() {
     });
 
     let labels = [], temperaturasProm = [], humedadesProm = [];
+    const promedioPromises = [];
     for (let hora in horas) {
       labels.push(hora);
       let temps = horas[hora].temperaturas;
@@ -131,6 +149,7 @@ async function obtenerDatos() {
       let promedioHum = hums.reduce((a, b) => a + b, 0) / hums.length;
       temperaturasProm.push(promedioTemp.toFixed(2));
       humedadesProm.push(promedioHum.toFixed(2));
+      promedioPromises.push(guardarPromedioHora(hora, promedioTemp, promedioHum));
     }
 
     graficoTemp.data.labels = labels;
@@ -145,6 +164,7 @@ async function obtenerDatos() {
     graficoHum.data.datasets[0].borderColor = humedadesProm.map(h => h < humMin || h > humMax ? 'rgba(255,99,132,1)' : 'rgba(75,192,192,1)');
     graficoHum.update();
 
+    await Promise.allSettled([...firestoreSaves, ...promedioPromises]);
     document.getElementById('spinner').style.display = 'none';
   } catch (error) {
     document.getElementById('spinner').style.display = 'none';
@@ -153,7 +173,6 @@ async function obtenerDatos() {
   }
 }
 
-// FILTRAR POR FECHA
 async function obtenerDatosPorFecha() {
   try {
     document.getElementById('spinner').style.display = 'block';
@@ -255,15 +274,7 @@ function exportarDatos() {
       });
       if (filas.length === 1) { alert('No hay datos para la fecha seleccionada.'); return; }
       const csv = filas.join('\n');
-      const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-      const urlBlob = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = urlBlob;
-      a.download = `datos_${fechaInput}.csv`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(urlBlob);
+      descargarCSV(csv, `datos_${fechaInput}.csv`);
     })
     .catch(error => {
       alert('Error al exportar datos.');
@@ -277,43 +288,186 @@ function mostrarNotificacion(titulo, cuerpo) {
   }
 }
 
-setInterval(obtenerDatos, 15000);
-obtenerDatos();
+async function cargarHistoricoFirebase() {
+  try {
+    const fechaFiltro = document.getElementById('fechaFiltroHistorico').value;
+    let lecturasQuery = db.collection('lecturas').orderBy('fecha', 'desc');
+    let promediosQuery = db.collection('promedios_hora').orderBy('fechaRegistro', 'desc');
 
-// --- Pestañas y registros de pollos ---
+    if (fechaFiltro) {
+      const inicio = `${fechaFiltro}T00:00:00.000Z`;
+      const fin = `${fechaFiltro}T23:59:59.999Z`;
+      lecturasQuery = lecturasQuery.where('fecha', '>=', inicio).where('fecha', '<=', fin);
+      promediosQuery = promediosQuery.where('fechaRegistro', '>=', inicio).where('fechaRegistro', '<=', fin);
+    }
+
+    const lecturasSnapshot = await lecturasQuery.get();
+    const promediosSnapshot = await promediosQuery.get();
+
+    const tablaLecturas = document.querySelector('#tablaLecturas tbody');
+    tablaLecturas.innerHTML = '';
+    lecturasSnapshot.forEach(docSnap => {
+      const data = docSnap.data();
+      const fecha = new Date(data.fecha).toLocaleString();
+      const tr = document.createElement('tr');
+      tr.innerHTML = `<td>${fecha}</td><td>${data.temperatura}</td><td>${data.humedad}</td><td>${data.entry_id}</td>`;
+      tablaLecturas.appendChild(tr);
+    });
+    if (tablaLecturas.children.length === 0) {
+      const tr = document.createElement('tr');
+      tr.innerHTML = `<td colspan="4" style="padding:12px;color:#666;">No hay lecturas guardadas.</td>`;
+      tablaLecturas.appendChild(tr);
+    }
+
+    const tablaPromedios = document.querySelector('#tablaPromedios tbody');
+    tablaPromedios.innerHTML = '';
+    promediosSnapshot.forEach(docSnap => {
+      const data = docSnap.data();
+      const fecha = new Date(data.fechaRegistro).toLocaleDateString();
+      const tr = document.createElement('tr');
+      tr.innerHTML = `<td>${fecha}</td><td>${data.hora}</td><td>${Number(data.temperatura).toFixed(2)}</td><td>${Number(data.humedad).toFixed(2)}</td>`;
+      tablaPromedios.appendChild(tr);
+    });
+    if (tablaPromedios.children.length === 0) {
+      const tr = document.createElement('tr');
+      tr.innerHTML = `<td colspan="4" style="padding:12px;color:#666;">No hay promedios horarios guardados.</td>`;
+      tablaPromedios.appendChild(tr);
+    }
+
+    document.getElementById('historicoMensajes').textContent = `Histórico cargado ${fechaFiltro ? 'para ' + fechaFiltro : 'de todas las fechas'}.`;
+  } catch (error) {
+    console.error(error);
+    document.getElementById('historicoMensajes').textContent = 'Error al cargar el histórico desde Firebase.';
+  }
+}
+
+async function exportarLecturasFirebase() {
+  try {
+    const snapshot = await db.collection('lecturas').orderBy('fecha', 'desc').get();
+    const filas = [['FechaHora','Temperatura','Humedad','Entry ID']];
+    snapshot.forEach(docSnap => {
+      const data = docSnap.data();
+      filas.push([data.fecha, data.temperatura, data.humedad, data.entry_id]);
+    });
+    if (filas.length === 1) { alert('No hay lecturas para exportar.'); return; }
+    const csv = filas.map(row => row.join(',')).join('\n');
+    descargarCSV(csv, 'lecturas_firebase.csv');
+  } catch (error) {
+    console.error(error);
+    alert('Error al exportar lecturas de Firebase.');
+  }
+}
+
+async function exportarPromediosFirebase() {
+  try {
+    const snapshot = await db.collection('promedios_hora').orderBy('fechaRegistro', 'desc').get();
+    const filas = [['Fecha','Hora','Temperatura promedio','Humedad promedio']];
+    snapshot.forEach(docSnap => {
+      const data = docSnap.data();
+      filas.push([data.fechaRegistro, data.hora, Number(data.temperatura).toFixed(2), Number(data.humedad).toFixed(2)]);
+    });
+    if (filas.length === 1) { alert('No hay promedios para exportar.'); return; }
+    const csv = filas.map(row => row.join(',')).join('\n');
+    descargarCSV(csv, 'promedios_hora_firebase.csv');
+  } catch (error) {
+    console.error(error);
+    alert('Error al exportar promedios de Firebase.');
+  }
+}
+
+function descargarCSV(csv, nombreArchivo) {
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+  const urlBlob = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = urlBlob;
+  a.download = nombreArchivo;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(urlBlob);
+}
+
+async function guardarLecturaThingSpeak(feed) {
+  try {
+    const idLectura = feed.entry_id.toString();
+    const referencia = db.collection('lecturas').doc(idLectura);
+    const existe = await referencia.get();
+    if (existe.exists) {
+      return;
+    }
+    await referencia.set({
+      entry_id: feed.entry_id,
+      temperatura: Number(feed.field1),
+      humedad: Number(feed.field2),
+      fecha: feed.created_at
+    });
+  } catch (error) {
+    console.warn('No se pudo guardar lectura en Firebase:', error);
+  }
+}
+
+async function guardarPromedioHora(hora, temperatura, humedad) {
+  try {
+    const id = new Date().toISOString().slice(0,10) + "_" + hora;
+    await db.collection('promedios_hora').doc(id).set({
+      hora,
+      temperatura,
+      humedad,
+      fechaRegistro: new Date().toISOString()
+    });
+  } catch (error) {
+    console.warn('No se pudo guardar promedio en Firebase:', error);
+  }
+}
+
+function mostrarNotificacion(titulo, cuerpo) {
+  if ('Notification' in window && Notification.permission === 'granted') {
+    new Notification(titulo, { body: cuerpo, icon: 'https://cdn-icons-png.flaticon.com/512/1828/1828843.png' });
+  }
+}
+
 function cambiarPestana(pestana) {
   const dash = document.getElementById('dashboardContenedor');
   const pollos = document.getElementById('seccionPollos');
+  const historico = document.getElementById('seccionHistorico');
   const tabDash = document.getElementById('tab-dashboard');
   const tabPoll = document.getElementById('tab-pollos');
+  const tabHist = document.getElementById('tab-historico');
   const floating = document.getElementById('floatingConfigBtn');
   if (pestana === 'pollos') {
     dash.style.display = 'none';
     pollos.style.display = 'block';
+    historico.style.display = 'none';
     tabDash.classList.remove('active'); tabDash.setAttribute('aria-selected','false');
     tabPoll.classList.add('active'); tabPoll.setAttribute('aria-selected','true');
+    tabHist.classList.remove('active'); tabHist.setAttribute('aria-selected','false');
     if (floating) floating.style.display = 'none';
+  } else if (pestana === 'historico') {
+    dash.style.display = 'none';
+    pollos.style.display = 'none';
+    historico.style.display = 'block';
+    tabDash.classList.remove('active'); tabDash.setAttribute('aria-selected','false');
+    tabPoll.classList.remove('active'); tabPoll.setAttribute('aria-selected','false');
+    tabHist.classList.add('active'); tabHist.setAttribute('aria-selected','true');
+    if (floating) floating.style.display = 'none';
+    cargarHistoricoFirebase();
   } else {
     dash.style.display = 'block';
     pollos.style.display = 'none';
+    historico.style.display = 'none';
     tabPoll.classList.remove('active'); tabPoll.setAttribute('aria-selected','false');
+    tabHist.classList.remove('active'); tabHist.setAttribute('aria-selected','false');
     tabDash.classList.add('active'); tabDash.setAttribute('aria-selected','true');
     if (floating) floating.style.display = 'inline-block';
   }
 }
 
-function obtenerRegistrosPollos() {
-  try {
-    const raw = localStorage.getItem('registrosPollos');
-    return raw ? JSON.parse(raw) : [];
-  } catch (e) { console.log(e); return []; }
+async function obtenerRegistrosPollos() {
+  const snapshot = await db.collection('pollos').orderBy('fecha', 'desc').get();
+  return snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
 }
 
-function guardarRegistrosPollos(lista) {
-  localStorage.setItem('registrosPollos', JSON.stringify(lista));
-}
-
-function guardarRegistroPollos() {
+async function guardarRegistroPollos() {
   const pollo = document.getElementById('polloId').value.trim();
   const fechaInput = document.getElementById('fechaPollos').value;
   const peso = parseFloat(document.getElementById('pesoPollos').value);
@@ -321,40 +475,45 @@ function guardarRegistroPollos() {
   const fecha = fechaInput ? new Date(fechaInput).toISOString() : new Date().toISOString();
   if (!pollo) { alert('Ingresa un identificador o nombre del pollo.'); return; }
   if (isNaN(peso) || isNaN(comida)) { alert('Completa peso y comida.'); return; }
-  const lista = obtenerRegistrosPollos();
-  lista.unshift({ pollo, fecha, peso, comida });
-  guardarRegistrosPollos(lista);
-  renderListaPollos();
+  await db.collection('pollos').add({
+    pollo,
+    fecha,
+    peso,
+    comida,
+    creadoEn: Date.now()
+  });
   document.getElementById('formPollos').reset();
+  await renderListaPollos();
 }
 
-function renderListaPollos() {
-  const lista = obtenerRegistrosPollos();
+async function renderListaPollos() {
+  const lista = await obtenerRegistrosPollos();
   const tbody = document.querySelector('#tablaPollos tbody');
   tbody.innerHTML = '';
   const filtro = document.getElementById('filtroPollos') ? document.getElementById('filtroPollos').value : 'Todos';
+
   if (lista.length === 0) {
     const tr = document.createElement('tr');
     tr.innerHTML = `<td colspan="5" style="padding:12px;color:#666;">No hay registros.</td>`;
     tbody.appendChild(tr);
-    actualizarFiltroPollos();
+    actualizarFiltroPollos(lista);
     return;
   }
-  lista.forEach((r, idx) => {
+
+  lista.forEach(r => {
     if (filtro !== 'Todos' && r.pollo !== filtro) return;
     const tr = document.createElement('tr');
     const fecha = new Date(r.fecha);
     const fechaStr = fecha.toLocaleString();
-    tr.innerHTML = `<td>${r.pollo}</td><td>${fechaStr}</td><td>${r.peso.toFixed(2)}</td><td>${r.comida}</td><td><button class="export-btn" onclick="borrarRegistroPollos(${idx})">Borrar</button></td>`;
+    tr.innerHTML = `<td>${r.pollo}</td><td>${fechaStr}</td><td>${Number(r.peso).toFixed(2)}</td><td>${Number(r.comida)}</td><td><button class="export-btn" onclick="borrarRegistroPollos('${r.id}')">Borrar</button></td>`;
     tbody.appendChild(tr);
   });
-  actualizarFiltroPollos();
+  actualizarFiltroPollos(lista);
 }
 
-function actualizarFiltroPollos() {
+function actualizarFiltroPollos(lista = []) {
   const select = document.getElementById('filtroPollos');
   if (!select) return;
-  const lista = obtenerRegistrosPollos();
   const conjuntos = ['Todos'];
   lista.forEach(r => { if (!conjuntos.includes(r.pollo)) conjuntos.push(r.pollo); });
   const actual = select.value || 'Todos';
@@ -365,18 +524,17 @@ function actualizarFiltroPollos() {
   select.value = actual;
 }
 
-// Exportar CSV: por filtro y general
-function exportPollosPorFiltro() {
+async function exportPollosPorFiltro() {
   const sel = document.getElementById('filtroPollos');
   const filtro = sel ? sel.value : 'Todos';
-  if (filtro === 'Todos') { exportPollosTodos(); return; }
-  const lista = obtenerRegistrosPollos().filter(r => r.pollo === filtro);
-  if (!lista.length) { alert('No hay registros para ' + filtro); return; }
-  exportListaPollosCSV(lista, filtro);
+  const lista = await obtenerRegistrosPollos();
+  const filtrada = filtro === 'Todos' ? lista : lista.filter(r => r.pollo === filtro);
+  if (!filtrada.length) { alert('No hay registros para ' + filtro); return; }
+  exportListaPollosCSV(filtrada, filtro);
 }
 
-function exportPollosTodos() {
-  const lista = obtenerRegistrosPollos();
+async function exportPollosTodos() {
+  const lista = await obtenerRegistrosPollos();
   if (!lista.length) { alert('No hay registros para exportar.'); return; }
   exportListaPollosCSV(lista, 'todos');
 }
@@ -390,27 +548,17 @@ function exportListaPollosCSV(lista, nombre) {
     filas.push([r.pollo, fechaStr, r.peso, r.comida].join(','));
   });
   const csv = filas.join('\n');
-  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-  const urlBlob = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = urlBlob;
-  a.download = `registros_pollos_${nombre}.csv`;
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  URL.revokeObjectURL(urlBlob);
+  descargarCSV(csv, `registros_pollos_${nombre}.csv`);
 }
 
-function borrarRegistroPollos(indice) {
-  const lista = obtenerRegistrosPollos();
-  if (!confirm('¿Eliminar este registro?')) return;
-  lista.splice(indice,1);
-  guardarRegistrosPollos(lista);
-  renderListaPollos();
+async function borrarRegistroPollos(id) {
+  if (!confirm('¿Eliminar registro?')) return;
+  await db.collection('pollos').doc(id).delete();
+  await renderListaPollos();
 }
 
-// Render inicial de registros de pollos
 renderListaPollos();
+
 // Asegurar visibilidad inicial del engranaje: solo en Dashboard
 {
   const dash = document.getElementById('dashboardContenedor');
@@ -419,7 +567,6 @@ renderListaPollos();
     if (dash && dash.style.display === 'none') floating.style.display = 'none';
     else floating.style.display = 'inline-block';
   }
-  // Asegurar que el card que contiene el formulario esté oculto si el form está oculto
   const form = document.getElementById('formRangos');
   if (form) {
     const card = form.closest('.card');
@@ -429,3 +576,6 @@ renderListaPollos();
     }
   }
 }
+
+setInterval(obtenerDatos, 15000);
+obtenerDatos();
