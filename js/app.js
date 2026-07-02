@@ -125,8 +125,14 @@ async function obtenerDatos() {
     const response = await fetch(urlGrafico);
     const data = await response.json();
     const feeds = data.feeds.filter(feed => feed.field1 && feed.field2 && !isNaN(parseFloat(feed.field1)) && !isNaN(parseFloat(feed.field2)));
+    if (!feeds.length) {
+      document.getElementById('spinner').style.display = 'none';
+      return;
+    }
 
-    const firestoreSaves = feeds.map(feed => guardarLecturaThingSpeak(feed));
+    feeds.sort((a, b) => parseInt(a.entry_id) - parseInt(b.entry_id));
+    const latestFeed = feeds[feeds.length - 1];
+    await guardarLecturaUltimaYHistorico(latestFeed);
 
     let horas = {};
     feeds.forEach(feed => {
@@ -139,17 +145,17 @@ async function obtenerDatos() {
       horas[hora].humedades.push(hum);
     });
 
-    let labels = [], temperaturasProm = [], humedadesProm = [];
-    const promedioPromises = [];
+    const labels = [];
+    const temperaturasProm = [];
+    const humedadesProm = [];
     for (let hora in horas) {
       labels.push(hora);
-      let temps = horas[hora].temperaturas;
-      let hums = horas[hora].humedades;
-      let promedioTemp = temps.reduce((a, b) => a + b, 0) / temps.length;
-      let promedioHum = hums.reduce((a, b) => a + b, 0) / hums.length;
+      const temps = horas[hora].temperaturas;
+      const hums = horas[hora].humedades;
+      const promedioTemp = temps.reduce((a, b) => a + b, 0) / temps.length;
+      const promedioHum = hums.reduce((a, b) => a + b, 0) / hums.length;
       temperaturasProm.push(promedioTemp.toFixed(2));
       humedadesProm.push(promedioHum.toFixed(2));
-      promedioPromises.push(guardarPromedioHora(hora, promedioTemp, promedioHum));
     }
 
     graficoTemp.data.labels = labels;
@@ -164,7 +170,15 @@ async function obtenerDatos() {
     graficoHum.data.datasets[0].borderColor = humedadesProm.map(h => h < humMin || h > humMax ? 'rgba(255,99,132,1)' : 'rgba(75,192,192,1)');
     graficoHum.update();
 
-    await Promise.allSettled([...firestoreSaves, ...promedioPromises]);
+    const currentHourLabel = String(new Date(latestFeed.created_at).getHours()).padStart(2, '0') + ":00";
+    const currentHourKey = `${latestFeed.created_at.slice(0,10)}_${currentHourLabel.slice(0,2)}`;
+    const currentHourData = horas[currentHourLabel];
+    if (currentHourData) {
+      const avgTemp = currentHourData.temperaturas.reduce((a, b) => a + b, 0) / currentHourData.temperaturas.length;
+      const avgHum = currentHourData.humedades.reduce((a, b) => a + b, 0) / currentHourData.humedades.length;
+      await guardarPromedioHora(currentHourKey, avgTemp, avgHum, latestFeed.created_at);
+    }
+
     document.getElementById('spinner').style.display = 'none';
   } catch (error) {
     document.getElementById('spinner').style.display = 'none';
@@ -291,7 +305,7 @@ function mostrarNotificacion(titulo, cuerpo) {
 async function cargarHistoricoFirebase() {
   try {
     const fechaFiltro = document.getElementById('fechaFiltroHistorico').value;
-    let lecturasQuery = db.collection('lecturas').orderBy('fecha', 'desc');
+    let lecturasQuery = db.collection('historico_lecturas').orderBy('fecha', 'desc');
     let promediosQuery = db.collection('promedios_hora').orderBy('fechaRegistro', 'desc');
 
     if (fechaFiltro) {
@@ -343,7 +357,7 @@ async function cargarHistoricoFirebase() {
 
 async function exportarLecturasFirebase() {
   try {
-    const snapshot = await db.collection('lecturas').orderBy('fecha', 'desc').get();
+    const snapshot = await db.collection('historico_lecturas').orderBy('fecha', 'desc').get();
     const filas = [['FechaHora','Temperatura','Humedad','Entry ID']];
     snapshot.forEach(docSnap => {
       const data = docSnap.data();
@@ -387,36 +401,42 @@ function descargarCSV(csv, nombreArchivo) {
   URL.revokeObjectURL(urlBlob);
 }
 
-async function guardarLecturaThingSpeak(feed) {
+async function guardarLecturaUltimaYHistorico(feed) {
   try {
     const idLectura = feed.entry_id.toString();
-    const referencia = db.collection('lecturas').doc(idLectura);
-    const existe = await referencia.get();
-    if (existe.exists) {
-      return;
-    }
-    await referencia.set({
-      entry_id: feed.entry_id,
+    const ultimaRef = db.collection('lecturas').doc('ultima');
+    const ultimaSnap = await ultimaRef.get();
+    const currentData = {
+      entry_id: idLectura,
       temperatura: Number(feed.field1),
       humedad: Number(feed.field2),
       fecha: feed.created_at
-    });
+    };
+
+    if (!ultimaSnap.exists || ultimaSnap.data().entry_id !== idLectura) {
+      await ultimaRef.set(currentData);
+      await db.collection('historico_lecturas').doc(idLectura).set(currentData);
+    }
   } catch (error) {
-    console.warn('No se pudo guardar lectura en Firebase:', error);
+    console.warn('No se pudo guardar la lectura en Firebase:', error);
   }
 }
 
-async function guardarPromedioHora(hora, temperatura, humedad) {
+async function guardarPromedioHora(id, temperatura, humedad, fechaRegistro) {
   try {
-    const id = new Date().toISOString().slice(0,10) + "_" + hora;
-    await db.collection('promedios_hora').doc(id).set({
-      hora,
+    const docRef = db.collection('promedios_hora').doc(id);
+    const snapshot = await docRef.get();
+    if (snapshot.exists) {
+      return;
+    }
+    await docRef.set({
+      hora: id,
       temperatura,
       humedad,
-      fechaRegistro: new Date().toISOString()
+      fechaRegistro: fechaRegistro || new Date().toISOString()
     });
   } catch (error) {
-    console.warn('No se pudo guardar promedio en Firebase:', error);
+    console.warn('No se pudo guardar el promedio horario en Firebase:', error);
   }
 }
 
@@ -577,5 +597,5 @@ renderListaPollos();
   }
 }
 
-setInterval(obtenerDatos, 15000);
+setInterval(obtenerDatos, 300000);
 obtenerDatos();
