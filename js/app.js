@@ -271,28 +271,48 @@ function exportarDatos() {
   let endDate;
   let nombreArchivo;
 
+  // Normalizar valores de fecha que puedan venir en formato dd/mm/yyyy
+  function normalizeDateValue(v) {
+    if (!v) return '';
+    // Si ya está en formato yyyy-mm-dd, devolver tal cual
+    if (/^\d{4}-\d{2}-\d{2}$/.test(v)) return v;
+    // Si viene como dd/mm/yyyy, convertir a yyyy-mm-dd
+    if (/^\d{2}\/\d{2}\/\d{4}$/.test(v)) {
+      const parts = v.split('/'); // dd, mm, yyyy
+      return `${parts[2]}-${parts[1].padStart(2,'0')}-${parts[0].padStart(2,'0')}`;
+    }
+    return v;
+  }
+
   if (fechaInicio) {
-    startDate = new Date(`${fechaInicio}T00:00:00`);
+    const fi = normalizeDateValue(fechaInicio);
+    startDate = new Date(`${fi}T00:00:00`);
     if (fechaFin) {
-      endDate = new Date(`${fechaFin}T23:59:59`);
+      const ff = normalizeDateValue(fechaFin);
+      endDate = new Date(`${ff}T23:59:59`);
       if (endDate < startDate) {
         alert('La fecha de fin debe ser igual o posterior a la fecha de inicio.');
         return;
       }
       nombreArchivo = `datos_${fechaInicio}_a_${fechaFin}.csv`;
     } else {
-      endDate = new Date(`${fechaInicio}T23:59:59`);
+      const fi2 = normalizeDateValue(fechaInicio);
+      endDate = new Date(`${fi2}T23:59:59`);
       nombreArchivo = `datos_${fechaInicio}.csv`;
     }
   } else {
-    startDate = new Date(`${fechaInput}T00:00:00`);
-    endDate = new Date(`${fechaInput}T23:59:59`);
+    const fsel = normalizeDateValue(fechaInput);
+    startDate = new Date(`${fsel}T00:00:00`);
+    endDate = new Date(`${fsel}T23:59:59`);
     nombreArchivo = `datos_${fechaInput}.csv`;
   }
 
   const url = `https://api.thingspeak.com/channels/${channelID}/feeds.json?days=30`;
   fetch(url)
-    .then(resp => resp.json())
+    .then(resp => {
+      if (!resp.ok) throw new Error('HTTP ' + resp.status);
+      return resp.json();
+    })
     .then(data => {
       const feeds = data.feeds.filter(feed => feed.field1 && feed.field2 && !isNaN(parseFloat(feed.field1)) && !isNaN(parseFloat(feed.field2)));
       const filas = [];
@@ -309,9 +329,38 @@ function exportarDatos() {
       descargarCSV(csv, nombreArchivo);
     })
     .catch(error => {
-      alert('Error al exportar datos.');
-      console.log(error);
+      console.error('Error exportando datos:', error);
+      alert('Error al exportar datos: ' + (error && error.message ? error.message : 'ver consola'));
     });
+}
+
+// Descarga un CSV en el navegador (compatible con la mayoría de navegadores)
+function descargarCSV(csvContent, filename) {
+  try {
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    if (navigator.msSaveBlob) { // IE 10+
+      navigator.msSaveBlob(blob, filename);
+      return;
+    }
+    const link = document.createElement('a');
+    if (link.download !== undefined) { // soporta atributo download
+      const url = URL.createObjectURL(blob);
+      link.setAttribute('href', url);
+      link.setAttribute('download', filename);
+      link.style.visibility = 'hidden';
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+    } else {
+      // Fallback: abrir en nueva pestaña
+      const url = 'data:text/csv;charset=utf-8,' + encodeURIComponent(csvContent);
+      window.open(url);
+    }
+  } catch (e) {
+    console.error('Error en descargarCSV:', e);
+    alert('No se pudo descargar el CSV. Revisa la consola.');
+  }
 }
 
 function mostrarNotificacion(titulo, cuerpo) {
