@@ -21,12 +21,30 @@ const db = firebase.firestore();
 const channelID = "3334837";
 const urlGrafico = `https://api.thingspeak.com/channels/${channelID}/feeds.json?days=1`;
 const urlUltimo = `https://api.thingspeak.com/channels/${channelID}/feeds/last.json`;
+const timezoneThingSpeak = 'America/Bogota';
 
 // Rangos de alerta (valores por defecto)
 let tempMin = 18;
 let tempMax = 24;
 let humMin = 50;
 let humMax = 70;
+
+function construirUrlFeedsPorRango(startDate, endDate) {
+  const start = startDate.toISOString().slice(0, 19) + 'Z';
+  const end = endDate.toISOString().slice(0, 19) + 'Z';
+  return `https://api.thingspeak.com/channels/${channelID}/feeds.json?start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}&timezone=${encodeURIComponent(timezoneThingSpeak)}`;
+}
+
+async function obtenerFeedsPorRango(startDate, endDate) {
+  const url = construirUrlFeedsPorRango(startDate, endDate);
+  const response = await fetch(url);
+  const data = await response.json();
+  return (data.feeds || []).filter(feed => feed.field1 && feed.field2 && !isNaN(parseFloat(feed.field1)) && !isNaN(parseFloat(feed.field2)));
+}
+
+function formatearFecha(fecha) {
+  return `${fecha.getFullYear()}-${String(fecha.getMonth() + 1).padStart(2, '0')}-${String(fecha.getDate()).padStart(2, '0')}`;
+}
 
 function mostrarConfigRangos() {
   const form = document.getElementById('formRangos');
@@ -181,9 +199,27 @@ async function obtenerDatosPorFecha() {
     document.getElementById('spinner').style.display = 'block';
     const fechaInput = document.getElementById("fechaSeleccionada").value;
     if (!fechaInput) { document.getElementById('spinner').style.display = 'none'; return; }
-    const response = await fetch(`https://api.thingspeak.com/channels/${channelID}/feeds.json?days=30`);
-    const data = await response.json();
-    const feeds = data.feeds.filter(feed => feed.field1 && feed.field2 && !isNaN(parseFloat(feed.field1)) && !isNaN(parseFloat(feed.field2)));
+
+    const startDate = new Date(`${fechaInput}T00:00:00`);
+    const endDate = new Date(`${fechaInput}T23:59:59`);
+
+    let feeds = [];
+    try {
+      feeds = await obtenerFeedsPorRango(startDate, endDate);
+    } catch (error) {
+      console.log('Rango exacto sin resultados, intentando respaldo:', error);
+    }
+
+    if (!feeds.length) {
+      const response = await fetch(`https://api.thingspeak.com/channels/${channelID}/feeds.json?days=365`);
+      const data = await response.json();
+      feeds = (data.feeds || []).filter(feed => feed.field1 && feed.field2 && !isNaN(parseFloat(feed.field1)) && !isNaN(parseFloat(feed.field2)));
+      feeds = feeds.filter(feed => {
+        const fecha = new Date(feed.created_at);
+        return formatearFecha(fecha) === fechaInput;
+      });
+    }
+
     document.getElementById("listaAlertasTemp").innerHTML = "";
     document.getElementById("listaAlertasHum").innerHTML = "";
 
@@ -193,25 +229,22 @@ async function obtenerDatosPorFecha() {
     };
 
     feeds.forEach(feed => {
-      let fecha = new Date(feed.created_at);
-      let fechaFeed = fecha.getFullYear() + "-" + String(fecha.getMonth() + 1).padStart(2, '0') + "-" + String(fecha.getDate()).padStart(2, '0');
-      if (fechaFeed == fechaInput) {
-        let temp = parseFloat(feed.field1);
-        let hum = parseFloat(feed.field2);
-        resumen.temp.suma += temp;
-        resumen.temp.count += 1;
-        resumen.temp.min = Math.min(resumen.temp.min, temp);
-        resumen.temp.max = Math.max(resumen.temp.max, temp);
-        resumen.hum.suma += hum;
-        resumen.hum.count += 1;
-        resumen.hum.min = Math.min(resumen.hum.min, hum);
-        resumen.hum.max = Math.max(resumen.hum.max, hum);
-        let hora = fecha.getHours() + ":" + fecha.getMinutes() + ":" + fecha.getSeconds();
-        if (temp < tempMin) agregarAlerta("Hace frío (" + temp + " °C) - " + hora, 'temp');
-        if (temp > tempMax) agregarAlerta("Hace calor (" + temp + " °C) - " + hora, 'temp');
-        if (hum < humMin) agregarAlerta("Humedad baja (" + hum + "% ) - " + hora, 'hum');
-        if (hum > humMax) agregarAlerta("Humedad alta (" + hum + "% ) - " + hora, 'hum');
-      }
+      const fecha = new Date(feed.created_at);
+      const temp = parseFloat(feed.field1);
+      const hum = parseFloat(feed.field2);
+      resumen.temp.suma += temp;
+      resumen.temp.count += 1;
+      resumen.temp.min = Math.min(resumen.temp.min, temp);
+      resumen.temp.max = Math.max(resumen.temp.max, temp);
+      resumen.hum.suma += hum;
+      resumen.hum.count += 1;
+      resumen.hum.min = Math.min(resumen.hum.min, hum);
+      resumen.hum.max = Math.max(resumen.hum.max, hum);
+      const hora = `${String(fecha.getHours()).padStart(2, '0')}:${String(fecha.getMinutes()).padStart(2, '0')}:${String(fecha.getSeconds()).padStart(2, '0')}`;
+      if (temp < tempMin) agregarAlerta("Hace frío (" + temp + " °C) - " + hora, 'temp');
+      if (temp > tempMax) agregarAlerta("Hace calor (" + temp + " °C) - " + hora, 'temp');
+      if (hum < humMin) agregarAlerta("Humedad baja (" + hum + "% ) - " + hora, 'hum');
+      if (hum > humMax) agregarAlerta("Humedad alta (" + hum + "% ) - " + hora, 'hum');
     });
 
     const resumenDia = document.getElementById('resumenDia');
@@ -257,7 +290,7 @@ function agregarAlerta(texto, tipo) {
   }
 }
 
-function exportarDatos() {
+async function exportarDatos() {
   const fechaInput = document.getElementById('fechaSeleccionada').value;
   const fechaInicio = document.getElementById('fechaInicio').value;
   const fechaFin = document.getElementById('fechaFin').value;
@@ -290,28 +323,24 @@ function exportarDatos() {
     nombreArchivo = `datos_${fechaInput}.csv`;
   }
 
-  const url = `https://api.thingspeak.com/channels/${channelID}/feeds.json?days=30`;
-  fetch(url)
-    .then(resp => resp.json())
-    .then(data => {
-      const feeds = data.feeds.filter(feed => feed.field1 && feed.field2 && !isNaN(parseFloat(feed.field1)) && !isNaN(parseFloat(feed.field2)));
-      const filas = [];
-      filas.push(['FechaHora','Temperatura','Humedad'].join(','));
-      feeds.forEach(feed => {
-        const fecha = new Date(feed.created_at);
-        if (fecha >= startDate && fecha <= endDate) {
-          const hora = String(fecha.getHours()).padStart(2, '0') + ':' + String(fecha.getMinutes()).padStart(2, '0') + ':' + String(fecha.getSeconds()).padStart(2, '0');
-          const fechaFeed = fecha.getFullYear() + '-' + String(fecha.getMonth()+1).padStart(2,'0') + '-' + String(fecha.getDate()).padStart(2,'0');
-          filas.push([fechaFeed + ' ' + hora, feed.field1, feed.field2].join(','));
-        }
-      });
-      const csv = filas.join('\n');
-      descargarCSV(csv, nombreArchivo);
-    })
-    .catch(error => {
-      alert('Error al exportar datos.');
-      console.log(error);
+  try {
+    const feeds = await obtenerFeedsPorRango(startDate, endDate);
+    const filas = [];
+    filas.push(['FechaHora','Temperatura','Humedad'].join(','));
+    feeds.forEach(feed => {
+      const fecha = new Date(feed.created_at);
+      if (fecha >= startDate && fecha <= endDate) {
+        const hora = String(fecha.getHours()).padStart(2, '0') + ':' + String(fecha.getMinutes()).padStart(2, '0') + ':' + String(fecha.getSeconds()).padStart(2, '0');
+        const fechaFeed = formatearFecha(fecha);
+        filas.push([fechaFeed + ' ' + hora, feed.field1, feed.field2].join(','));
+      }
     });
+    const csv = filas.join('\n');
+    descargarCSV(csv, nombreArchivo);
+  } catch (error) {
+    alert('Error al exportar datos.');
+    console.log(error);
+  }
 }
 
 function mostrarNotificacion(titulo, cuerpo) {
