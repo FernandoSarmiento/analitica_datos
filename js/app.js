@@ -290,6 +290,18 @@ function agregarAlerta(texto, tipo) {
   }
 }
 
+function descargarCSV(contenido, nombreArchivo) {
+  const blob = new Blob([contenido], { type: 'text/csv;charset=utf-8;' });
+  const url = window.URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = nombreArchivo;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  window.URL.revokeObjectURL(url);
+}
+
 async function exportarDatos() {
   const fechaInput = document.getElementById('fechaSeleccionada').value;
   const fechaInicio = document.getElementById('fechaInicio').value;
@@ -452,8 +464,13 @@ function exportListaPollosCSV(lista, nombre) {
   filas.push(['Pollo','FechaHora','Peso','Comida'].join(','));
   lista.forEach(r => {
     const fecha = new Date(r.fecha);
-    const fechaStr = fecha.toLocaleString();
-    filas.push([r.pollo, fechaStr, r.peso, r.comida].join(','));
+    const fechaStr = fecha.toLocaleString('es-ES');
+    const valores = [r.pollo, fechaStr, r.peso, r.comida];
+    const fila = valores.map(v => {
+      const texto = String(v ?? '');
+      return /[",\n]/.test(texto) ? `"${texto.replace(/"/g, '""')}"` : texto;
+    }).join(',');
+    filas.push(fila);
   });
   const csv = filas.join('\n');
   descargarCSV(csv, `registros_pollos_${nombre}.csv`);
